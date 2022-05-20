@@ -1,25 +1,25 @@
 CXX = dpcpp
 CXXFLAGS = -O2 -g -std=c++17
 
-BUFFER_EXE_NAME = vector-add-buffers
-BUFFER_SOURCES = src/vector-add-buffers.cpp
+SEQ_EXE_NAME = seq_fir
+SEQ_SOURCES = src/FIR_SEQ.cpp
 
-USM_EXE_NAME = vector-add-usm
-USM_SOURCES = src/filter.cpp
+PAR_EXE_NAME = par_fir
+PAR_SOURCES = src/FIR_PAR.cpp
 
-all: build_buffers
+all: build_FIR_seq
 
-build_buffers:
-	$(CXX) $(CXXFLAGS) -o $(BUFFER_EXE_NAME) $(BUFFER_SOURCES)
+build_FIR_seq:
+	$(CXX) $(CXXFLAGS) -o $(SEQ_EXE_NAME) $(SEQ_SOURCES)
 
-build_usm:
-	$(CXX) $(CXXFLAGS) -o $(USM_EXE_NAME) $(USM_SOURCES)
+build_FIR_par:
+	$(CXX) $(CXXFLAGS) -o $(PAR_EXE_NAME) $(PAR_SOURCES)
 
 run: 
-	./$(USM_EXE_NAME)
+	./$(SEQ_EXE_NAME)
 
-run_usm: 
-	./$(USM_EXE_NAME)
+run_par: 
+	./$(PAR_EXE_NAME)
 
 clean: 
-	rm -f $(BUFFER_EXE_NAME) $(USM_EXE_NAME)
+	rm -f $(SEQ_EXE_NAME) $(PAR_EXE_NAME)

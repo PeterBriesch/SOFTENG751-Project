@@ -46,32 +46,45 @@ void firFloatInit(double *a, size_t size) {
   // std::memset(insamp, 0, sizeof(insamp));
 }
 
+// ACC init
+void AccFloatInit(double *a, size_t size) {
+  for (size_t i = 0; i < size; i++) a[i] = 0;
+}
+
 // the FIR filter function
 void firFloat(double * coeffs, double * input, double * output,
-  int length, int filterLength) {
-  double acc; // accumulator for MACs
-  int n, k, j;
+  int length, int filterLength, queue &q) {
+  double* acc = malloc_shared<double>(sizeof(double)*filterLength, q); // accumulator for MACs allocated on device memory
 
-  // apply the filter to each input sample
-  for (n = 0; n < length; n++) {
-    // calculate output n
-    acc = 0;
-    for (k = 0; k < filterLength; k++) {
-      j = n - k; // position in input
-      
-      if (j >= 0)
-      {
-        acc += coeffs[k] * input[j];
+  //Init acc with 0
+  AccFloatInit(acc, filterLength);
+  
+  q.submit([&](handler &h){
+
+    h.parallel_for(range<1>(length), [=, &q](auto i){
+      double total = 0;
+      //Multiply
+      handler h;
+      h.parallel_for(range<1>(filterLength), [=](auto j){
+        int x = i[0] - j[0]; // position in input
+        
+        if (x >= 0)
+        {
+          acc[j] += coeffs[j] * input[x];
+        }
+      });
+
+      //Accumulate
+      for (int k = 0; k < filterLength; k++) {
+        total += acc[k];
       }
-    }
-    output[n] = acc;
-    std::cout << output[n] << ", ";
-  }
-  std::cout << "\n";
-  // // shift input samples back in time for next time
-  // std::memmove( & insamp[0], & insamp[length],
-  //   (filterLength - 1) * sizeof(double));
-}
+      output[i] = total;
+      AccFloatInit(acc, filterLength);
+    });
+  });
+  q.wait();
+
+};
 
 
 //////////////////////////////////////////////////////////////
@@ -80,8 +93,7 @@ void firFloat(double * coeffs, double * input, double * output,
 // bandpass filter centred around 1000 Hz
 // sampling rate = 8000 Hz
 #define FILTER_LEN 3
-double coeffs[FILTER_LEN] = {-0.0448093,0.0322875,0.0181163
-};
+double coeffs[FILTER_LEN] = {-0.0448093,0.0322875,0.0181163};
 
 void intToFloat(int16_t * input, double * output, int length) {
   int i;
@@ -117,46 +129,24 @@ int main(void) {
 
   try{
 
-    // array to hold input samples
-    // double *insamp = malloc_shared<double>(BUFFER_LEN, q);
     size_t size;
     double *input = malloc_shared<double>(SAMPLES, q);
     double *output = malloc_shared<double>(SAMPLES, q);
     double *floatInput = malloc_shared<double>(SAMPLES, q);
     double *floatOutput = malloc_shared<double>(SAMPLES, q);
-    // FILE * in_fid;
-    // FILE * out_fid;
-    // open the input waveform file
-    // in_fid = fopen("input.pcm", "rb");
-    // if (in_fid == 0) {
-    //   printf("couldn't open input.pcm");
-    //   return -1;
-    // }
-    // // open the output waveform file
-    // out_fid = fopen("outputFloat.pcm", "wb");
-    // if (out_fid == 0) {
-    //   printf("couldn't open outputFloat.pcm");
-    //   return -1;
-    // }
+    
     // initialize the filter
     firFloatInit(input, SAMPLES);
     // process all of the samples
     do {
-      // read samples from file
-      // size = fread(input, sizeof(int16_t), SAMPLES, in_fid);
       size = 0;
-      // convert to doubles
-      // intToFloat(input, floatInput, size);
-      // perform the filtering
-      firFloat(coeffs, input, output, SAMPLES, FILTER_LEN);
-      // convert to ints
-      // floatToInt(floatOutput, output, size);
-      // write samples to file
-      // fwrite(output, sizeof(int16_t), size, out_fid);
+      firFloat(coeffs, input, output, SAMPLES, FILTER_LEN, q);
     } while (size != 0);
-    // fclose(in_fid);
-    // fclose(out_fid);
     
+    for(int i = 0; i < SAMPLES; i++){
+      std::cout << output[i] << ", ";
+    }
+    std::cout << "\n";
   }
   catch (exception const &e)
   {
