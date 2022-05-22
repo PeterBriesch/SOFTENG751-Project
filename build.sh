@@ -1,4 +1,5 @@
 #!/bin/bash
 source /opt/intel/inteloneapi/setvars.sh
-make clean
-make build_usm
+rm build.sh.*
+rm run.sh.*
+make build_FIR_par_usm

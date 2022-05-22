@@ -7,19 +7,30 @@ SEQ_SOURCES = src/FIR_SEQ.cpp
 PAR_EXE_NAME = par_fir
 PAR_SOURCES = src/FIR_PAR.cpp
 
-all: build_FIR_seq
+PAR_EXE_USM_NAME = par_fir_usm
+PAR_USM_SOURCES = src/FIR_PAR_USM.cpp
+
+all: build_FIR_seq build_FIR_par_usm
 
 build_FIR_seq:
 	$(CXX) $(CXXFLAGS) -o $(SEQ_EXE_NAME) $(SEQ_SOURCES)
 
 build_FIR_par:
 	$(CXX) $(CXXFLAGS) -o $(PAR_EXE_NAME) $(PAR_SOURCES)
+	
+build_FIR_par_usm:
+	$(CXX) $(CXXFLAGS) -o $(PAR_EXE_USM_NAME) $(PAR_USM_SOURCES)
 
-run: 
+run: run_seq run_par_usm
+
+run_seq:
 	./$(SEQ_EXE_NAME)
 
 run_par: 
 	./$(PAR_EXE_NAME)
 
+run_par_usm:
+	./$(PAR_EXE_USM_NAME)
+
 clean: 
-	rm -f $(SEQ_EXE_NAME) $(PAR_EXE_NAME)
+	rm -f $(SEQ_EXE_NAME) $(PAR_EXE_NAME) $(PAR_EXE_USM_NAME) *.sh.*

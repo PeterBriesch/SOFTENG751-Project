@@ -1,4 +1,5 @@
 #include <CL/sycl.hpp>
+#include <chrono>
 // #include <tick_count.h>
 #include <array>
 #include <iostream>
@@ -12,17 +13,15 @@
 #include "dpc_common.hpp"
 
 using namespace sycl;
+using namespace std::chrono;
 
  //////////////////////////////////////////////////////////////
 // Filter Code Definitions
 //////////////////////////////////////////////////////////////
 // maximum number of inputs that can be handled
 // in one function call
-#define MAX_INPUT_LEN 80
-// maximum length of filter than can be handled
-#define MAX_FLT_LEN 3
-// buffer to hold all of the input samples
-#define BUFFER_LEN (MAX_FLT_LEN - 1 + MAX_INPUT_LEN)
+constexpr int FILTER_LEN = 256;
+constexpr int SAMPLES = 2560000;
 
 // Create an exception handler for asynchronous SYCL exceptions
 static auto exception_handler = [](sycl::exception_list e_list) {
@@ -41,9 +40,12 @@ static auto exception_handler = [](sycl::exception_list e_list) {
 
 // FIR init
 void firFloatInit(double *a, size_t size) {
+  // for (size_t i = 0; i < size; i++) a[i] = (rand() % 1);
   for (size_t i = 0; i < size; i++) a[i] = 0;
-  a[0] = 1;
+  a[1] = 1;
+
   // std::memset(insamp, 0, sizeof(insamp));
+
 }
 
 // the FIR filter function
@@ -65,9 +67,8 @@ void firFloat(double * coeffs, double * input, double * output,
       }
     }
     output[n] = acc;
-    std::cout << output[n] << ", ";
+    
   }
-  std::cout << "\n";
   // // shift input samples back in time for next time
   // std::memmove( & insamp[0], & insamp[length],
   //   (filterLength - 1) * sizeof(double));
@@ -79,8 +80,7 @@ void firFloat(double * coeffs, double * input, double * output,
 //////////////////////////////////////////////////////////////
 // bandpass filter centred around 1000 Hz
 // sampling rate = 8000 Hz
-#define FILTER_LEN 3
-double coeffs[FILTER_LEN] = {-0.0448093,0.0322875,0.0181163};
+double coeffs[FILTER_LEN];
 
 void intToFloat(int16_t * input, double * output, int length) {
   int i;
@@ -104,9 +104,10 @@ void floatToInt(double * input, int16_t * output, int length) {
   }
 }
 // number of samples to read per loop
-#define SAMPLES 80
 int main(void) {
 
+  srand(1);
+  for(int i = 0; i < FILTER_LEN; i++) coeffs[i] = -0.0448093;
   // The default device selector will select the most performant device.
   default_selector d_selector;
   queue q(d_selector, exception_handler);
@@ -119,10 +120,8 @@ int main(void) {
     // array to hold input samples
     // double *insamp = malloc_shared<double>(BUFFER_LEN, q);
     size_t size;
-    double *input = malloc_shared<double>(SAMPLES, q);
-    double *output = malloc_shared<double>(SAMPLES, q);
-    double *floatInput = malloc_shared<double>(SAMPLES, q);
-    double *floatOutput = malloc_shared<double>(SAMPLES, q);
+    double *input = static_cast<double *>(malloc(SAMPLES*sizeof(double)));
+    double *output = static_cast<double *>(malloc(SAMPLES*sizeof(double)));
     // FILE * in_fid;
     // FILE * out_fid;
     // open the input waveform file
@@ -147,14 +146,25 @@ int main(void) {
       // convert to doubles
       // intToFloat(input, floatInput, size);
       // perform the filtering
+      auto start = high_resolution_clock::now();
       firFloat(coeffs, input, output, SAMPLES, FILTER_LEN);
+      auto stop = high_resolution_clock::now();
+
+      auto duration = duration_cast<microseconds>(stop-start);
+      std::cout << "Duration of Filtering = " << duration.count() << " microseconds\n\n";
       // convert to ints
       // floatToInt(floatOutput, output, size);
       // write samples to file
       // fwrite(output, sizeof(int16_t), size, out_fid);
     } while (size != 0);
+    for(int i = 0; i < SAMPLES; i++){
+      std::cout << output[i] << ", ";
+    }
+    std::cout << "\n";
     // fclose(in_fid);
     // fclose(out_fid);
+    free(input);
+    free(output);
     
   }
   catch (exception const &e)

@@ -1,4 +1,5 @@
 #include <CL/sycl.hpp>
+#include <chrono>
 // #include <tick_count.h>
 #include <array>
 #include <iostream>
@@ -12,6 +13,7 @@
 #include "dpc_common.hpp"
 
 using namespace sycl;
+using namespace std::chrono;
 
  //////////////////////////////////////////////////////////////
 // Filter Code Definitions
@@ -41,8 +43,7 @@ static auto exception_handler = [](sycl::exception_list e_list) {
 
 // FIR init
 void firFloatInit(double *a, size_t size) {
-  for (size_t i = 0; i < size; i++) a[i] = 0;
-  a[0] = 1;
+  for (size_t i = 0; i < size; i++) a[i] = (rand() % 1);
   // std::memset(insamp, 0, sizeof(insamp));
 }
 
@@ -53,36 +54,23 @@ void AccFloatInit(double *a, size_t size) {
 
 // the FIR filter function
 void firFloat(double * coeffs, double * input, double * output,
-  int length, int filterLength, queue &q) {
-  double* acc = malloc_shared<double>(sizeof(double)*filterLength, q); // accumulator for MACs allocated on device memory
+  int length, int filterLength, double* acc, int* j, queue &q) {
 
-  //Init acc with 0
-  AccFloatInit(acc, filterLength);
-  
-  q.submit([&](handler &h){
-
-    h.parallel_for(range<1>(length), [=, &q](auto i){
-      double total = 0;
-      //Multiply
-      handler h;
-      h.parallel_for(range<1>(filterLength), [=](auto j){
-        int x = i[0] - j[0]; // position in input
-        
-        if (x >= 0)
-        {
-          acc[j] += coeffs[j] * input[x];
-        }
-      });
-
-      //Accumulate
-      for (int k = 0; k < filterLength; k++) {
-        total += acc[k];
+  q.parallel_for(length, [=](auto i){
+    // calculate output n
+    *acc = 0;
+    #pragma unroll
+    for (int k = 0; k < filterLength; k++) {
+      *j = i[0] - k; // position in input
+      
+      if (*j >= 0)
+      {
+        *acc += coeffs[k] * input[*j];
       }
-      output[i] = total;
-      AccFloatInit(acc, filterLength);
-    });
-  });
-  q.wait();
+    }
+    output[i] = *acc;
+
+  }).wait();
 
 };
 
@@ -92,8 +80,8 @@ void firFloat(double * coeffs, double * input, double * output,
 //////////////////////////////////////////////////////////////
 // bandpass filter centred around 1000 Hz
 // sampling rate = 8000 Hz
-#define FILTER_LEN 3
-double coeffs[FILTER_LEN] = {-0.0448093,0.0322875,0.0181163};
+#define FILTER_LEN 1
+double coeffs[FILTER_LEN] = {-0.0448093};
 
 void intToFloat(int16_t * input, double * output, int length) {
   int i;
@@ -117,8 +105,9 @@ void floatToInt(double * input, int16_t * output, int length) {
   }
 }
 // number of samples to read per loop
-#define SAMPLES 80
+#define SAMPLES 999999999
 int main(void) {
+  srand(1);
 
   // The default device selector will select the most performant device.
   default_selector d_selector;
@@ -130,23 +119,46 @@ int main(void) {
   try{
 
     size_t size;
-    double *input = malloc_shared<double>(SAMPLES, q);
-    double *output = malloc_shared<double>(SAMPLES, q);
-    double *floatInput = malloc_shared<double>(SAMPLES, q);
-    double *floatOutput = malloc_shared<double>(SAMPLES, q);
+    double *input = static_cast<double *>(malloc(SAMPLES * sizeof(double)));
+    double *output = static_cast<double *>(malloc(SAMPLES * sizeof(double)));
+
+    //alocate memory on device for use in parallel_for
+    double* acc = malloc_device<double>(sizeof(double), q); // accumulator for MACs allocated on device memory
+    int* j = malloc_device<int>(sizeof(int), q);
+    double* input_device = malloc_device<double>(sizeof(double) *SAMPLES, q);
+    double* output_device = malloc_device<double>(sizeof(double) *SAMPLES, q);
+    double* coeffs_device = malloc_device<double>(sizeof(double)*SAMPLES, q);
+    q.memcpy(coeffs_device, coeffs, sizeof(double)*FILTER_LEN).wait();
     
     // initialize the filter
     firFloatInit(input, SAMPLES);
+    
     // process all of the samples
     do {
+
+      q.memcpy(input_device, input, sizeof(double)*SAMPLES).wait();
+      std::cout << "memcpy 1 complete\n";
       size = 0;
-      firFloat(coeffs, input, output, SAMPLES, FILTER_LEN, q);
+      auto start = high_resolution_clock::now();
+      firFloat(coeffs, input, output_device, SAMPLES, FILTER_LEN, acc, j, q);
+      auto stop = high_resolution_clock::now();
+
+      q.memcpy(output, output_device, sizeof(double) * SAMPLES).wait();
+
+      auto duration = duration_cast<microseconds>(stop-start);
+      std::cout << "Duration of Filtering = " << duration.count() << " microseconds\n\n";
     } while (size != 0);
     
-    for(int i = 0; i < SAMPLES; i++){
-      std::cout << output[i] << ", ";
-    }
-    std::cout << "\n";
+    // for(int i = 0; i < SAMPLES; i++){
+    //   std::cout << output[i] << ", ";
+    // }
+    // std::cout << "\n";
+
+    free(input);
+    free(output);
+    free(acc, q);
+    free(j, q);
+    free(output_device, q);
   }
   catch (exception const &e)
   {
